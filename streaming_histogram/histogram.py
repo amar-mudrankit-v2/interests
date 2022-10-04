@@ -9,8 +9,11 @@ import bisect
 
 class HistogramBucket(object):
 
+    # Saves a lot of memory
+    __slots__ = ("centroid", "count")
+
     def __init__(self, centroid=None, count=None):
-        self.centroid = centroid
+        self.centroid = float(centroid)
         self.count = count
 
     def get_area(self):
@@ -42,6 +45,9 @@ class StreamingHistogram(object):
         # Because the bisect module does not support insertion based on key, we track the
         # centroids separately
         self._centroids = []
+        self._min = float('inf')
+        self._max = float('-inf')
+        self._count = 0
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -59,7 +65,16 @@ class StreamingHistogram(object):
             self.push_value(value)
 
     def push_value(self, value):
-        self.push_bucket(HistogramBucket(value, 1))
+        pos = bisect.bisect_left(self._centroids, value)
+        if pos < len(self.buckets) and self._centroids[pos] == value:
+            self.buckets[pos].count += 1
+            self._count += 1
+        else:
+            self.push_bucket(HistogramBucket(value, 1))
+        if value < self._min:
+            self._min = value
+        if value > self._max:
+            self._max = value
 
     def push_bucket(self, bucket):
         # Push the bucket in our sorted array
@@ -67,6 +82,7 @@ class StreamingHistogram(object):
         # bisect module does not support key argument in 3.7 yet
         # bisect.insort_left(self.buckets, bucket, key=lambda b: b.centroid)
         # So, lets find the centroid position in centroid list and use same in the buckets list
+        self._count += bucket.count
         pos = bisect.bisect_left(self._centroids, bucket.centroid)
         self._centroids.insert(pos, bucket.centroid)
         self.buckets.insert(pos, bucket)
@@ -96,6 +112,7 @@ class StreamingHistogram(object):
         pair[0].combine(pair[1])
         self.buckets.pop(index_to_remove)
         self._centroids.pop(index_to_remove)
+        assert all(self._centroids[i] <= self._centroids[i + 1] for i in range(len(self._centroids) - 1))
 
     def merge(self, histogram):
         """
@@ -111,9 +128,14 @@ class StreamingHistogram(object):
         for bucket in self.buckets:
             bucket.print()
 
-    def count_values(self):
-        count = 0
+    def count(self):
+        return self._count
+
+    def mean(self):
+        area = 0
+        items = 0
         for bucket in self.buckets:
-            count += bucket.count
-        return count
+            area += bucket.get_area()
+            items += bucket.count
+        return float(area/items)
 
