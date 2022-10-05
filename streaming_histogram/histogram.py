@@ -12,7 +12,7 @@ class HistogramBucket(object):
     # Saves a lot of memory
     __slots__ = ("centroid", "count")
 
-    def __init__(self, centroid=None, count=None):
+    def __init__(self, centroid=None, count=0):
         self.centroid = float(centroid)
         self.count = count
 
@@ -54,8 +54,8 @@ class StreamingHistogram(object):
             return False
         return self.buckets == other.buckets
 
-    @classmethod
-    def build_from_list(cls, values, max_buckets):
+    @staticmethod
+    def build_from_list(values, max_buckets):
         histogram = StreamingHistogram(max_buckets)
         histogram.push_list(values)
         return histogram
@@ -112,7 +112,10 @@ class StreamingHistogram(object):
         pair[0].combine(pair[1])
         self.buckets.pop(index_to_remove)
         self._centroids.pop(index_to_remove)
-        assert all(self._centroids[i] <= self._centroids[i + 1] for i in range(len(self._centroids) - 1))
+        self._centroids[index_to_remove - 1] = pair[0].centroid
+
+    def is_sorted(self):
+        return all(self.buckets[i].centroid <= self.buckets[i + 1].centroid for i in range(len(self.buckets) - 1))
 
     def merge(self, histogram):
         """
@@ -128,6 +131,14 @@ class StreamingHistogram(object):
         for bucket in self.buckets:
             bucket.print()
 
+    def get_frequencies(self):
+        return [bucket.count for bucket in self.buckets]
+
+    def plot(self):
+        import matplotlib.pyplot as plt
+        plt.hist(x=self._centroids, weights=self.get_frequencies())
+        plt.show()
+
     def count(self):
         return self._count
 
@@ -138,4 +149,66 @@ class StreamingHistogram(object):
             area += bucket.get_area()
             items += bucket.count
         return float(area/items)
+
+    def reshape(self, input_histogram):
+        """
+        Reshape "this" histogram with the shape same as input histogram.  Essentially, ensure that the bins / centroids
+        of this are same as the input histogram and reshuffle the counts so that they fit in the new bin structure
+
+        Why? Basically to be able to compare 2 histograms using PSI or other metric.  If 2 histograms don't have same
+        bin structure we can't compare them.
+
+        How?
+        1. Copy the buckets / centroids of the input histogram with counts = 0
+        2. The algorithm assumes that for a (centroid, count) bin, there are "count" points surroundiing "centroid", of
+           which "count / 2" points are to the left of the centroid and "count / 2" points to the right.  Imagine 2
+           consecutive bins (centroid1, count1) and (centroid2, count2).  The number of points between centroid1 and
+           centroid2 = (count1/2 + count2/2) = (count1 + count2) / 2.
+        3. Eventually the actual bins become [-inf, centroid1, centroid2, centroid3, +inf].  Suppose we want to place
+           the bucket (centroid_x, count_x) into this [-inf, centroid1, centroid2, centroid3, +inf] bin structure.
+           We find out pair such that centroid1 <= centroid_x <= centroid2.  Once we find such pair, we add count_x
+           to centroid1 if (centroid_x - centroid1) < (centroid2 - centroid_x), otherwise into centroid2.
+        :param histogram:
+        :return:
+        """
+        # These are going to be new buckets for "this" histogram
+        new_buckets = list()
+        # First entry in bucket range will be negative infinity
+        bucket_ranges = [float('-inf')]
+        for bucket in input_histogram.buckets:
+            # For all new buckets, the centroids are going to be of those of input histogram, with count = 0
+            new_buckets.append(HistogramBucket(bucket.centroid, 0))
+            # Then all intermediate entries in the bucket range will be the centroids of input histogram
+            bucket_ranges.append(bucket.centroid)
+
+        # And final entry will be positive infinity
+        bucket_ranges.append(float('inf'))
+
+        # Now start scanning the buckets of "this" histogram
+        for this_histogram_bucket in self.buckets:
+            # Find out, in which bucket range, current bucket of "this" histogram falls into.  bisect_right will give
+            # us the next index
+            # -1 because bucket_ranges has extra boundaries with +/- infinity
+            bucket_index = bisect.bisect_right(bucket_ranges, this_histogram_bucket.centroid) - 1
+            if bucket_index == 0:
+                # If it falls between negative infinity and the first centroid, then we copy all the counts
+                # to the bucket at 0th index
+                new_buckets[0].count += this_histogram_bucket.count
+            elif bucket_index == len(new_buckets):
+                # If it falls between the last bucket and positive infinity, then we copy all the counts to the
+                # last bucket
+                new_buckets[-1].count += this_histogram_bucket.count
+            else:
+                # Find out which bucket this centroid is closer to and add counts to that bucket
+                diff_prev = abs(this_histogram_bucket.centroid - new_buckets[bucket_index - 1].centroid)
+                diff_next = abs(new_buckets[bucket_index].centroid - this_histogram_bucket.centroid)
+                if diff_prev < diff_next:
+                    new_buckets[bucket_index - 1].count += this_histogram_bucket.count
+                else:
+                    new_buckets[bucket_index].count += this_histogram_bucket.count
+
+        # Set new buckets for "this" histogram
+        self.buckets = new_buckets
+        # and centroids
+        self._centroids = [bucket.centroid for bucket in self.buckets]
 
