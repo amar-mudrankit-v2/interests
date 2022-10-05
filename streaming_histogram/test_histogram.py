@@ -9,6 +9,7 @@ def add_values_to_histogram(count, max_buckets):
         histogram.push_value(random.uniform(-32767.0, 32768.0))
 
     assert histogram.count() == n
+    assert histogram.is_sorted()
     return histogram
 
 
@@ -47,3 +48,15 @@ def test_same_value():
     stream_histogram.push_list(values)
     stream_histogram.print()
     assert stream_histogram.count() == 2000
+
+
+def test_reshape_operation():
+    training_histogram = add_values_to_histogram(1000, 10)
+    training_histogram.plot()
+    inference_histogram = add_values_to_histogram(1000, 10)
+    inference_histogram.plot()
+
+    # Modify inference histogram to have same buckets as training and adjust its counts
+    inference_histogram.reshape(training_histogram)
+    inference_histogram.plot()
+
