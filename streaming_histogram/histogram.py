@@ -6,6 +6,8 @@
 
 import bisect
 
+import numpy as np
+
 
 class HistogramBucket(object):
 
@@ -211,4 +213,53 @@ class StreamingHistogram(object):
         self.buckets = new_buckets
         # and centroids
         self._centroids = [bucket.centroid for bucket in self.buckets]
+
+    def clone(self):
+        """
+        Clone "this" histogram and return
+        :return:
+        """
+        clone = StreamingHistogram(len(self.buckets))
+        for bucket in self.buckets:
+            clone.push_bucket(bucket)
+
+        return clone
+
+    def centroids_matching(self, input_histogram):
+        for index, bucket in enumerate(self.buckets):
+            if bucket.centroid != input_histogram.buckets[index].centroid:
+                return False
+        return True
+
+    def get_total_count(self):
+        return self._count
+
+    def compare_using_psi(self, input_histogram):
+        reshape_required = False
+        if len(self.buckets) != len(input_histogram.buckets):
+            reshape_required = True
+        elif not self.centroids_matching(input_histogram):
+            reshape_required = True
+
+        if reshape_required:
+            compare = input_histogram.clone()
+            compare.reshape(self)
+        else:
+            compare = input_histogram
+
+        psi_sum = 0
+        total_reference_count = self.get_total_count()
+        total_compare_count = compare.get_total_count()
+        for reference_bucket, compare_bucket in zip(self.buckets, compare.buckets):
+            reference_pct = reference_bucket.count / float(total_reference_count)
+            compare_pct = compare_bucket.count / float(total_compare_count)
+            if reference_pct == 0 or compare_pct == 0:
+                continue
+            psi = (compare_pct - reference_pct) * np.log(compare_pct/reference_pct)
+            psi_sum += psi
+
+        return psi_sum
+
+
+
 

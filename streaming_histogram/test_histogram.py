@@ -60,3 +60,21 @@ def test_reshape_operation():
     inference_histogram.reshape(training_histogram)
     inference_histogram.plot()
 
+
+def test_self_psi():
+    values = [random.uniform(-32767.0, 32768.0) for _ in range(1000)]
+    training_histogram = StreamingHistogram(max_buckets=10)
+    training_histogram.push_list(values)
+    inference_histogram = StreamingHistogram(max_buckets=10)
+    inference_histogram.push_list(values)
+
+    assert training_histogram.compare_using_psi(inference_histogram) == 0.0
+
+
+def test_psi():
+    training_histogram = add_values_to_histogram(1000, 10)
+    training_histogram.plot()
+    inference_histogram = add_values_to_histogram(1000, 10)
+    inference_histogram.plot()
+
+    print("PSI: {}".format(training_histogram.compare_using_psi(inference_histogram)))
